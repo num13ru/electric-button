@@ -11,3 +11,4 @@ eframe = { version = "0.37", default-features = false, features = [
 ] }
 wgpu = "30"
 bytemuck = { version = "1", features = ["derive"] }
+egui-wgpu = "0.37"
