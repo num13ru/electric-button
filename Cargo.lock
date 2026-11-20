@@ -479,7 +479,6 @@ dependencies = [
  "bytemuck",
  "eframe",
  "egui",
- "egui-wgpu",
  "wgpu",
 ]
 
