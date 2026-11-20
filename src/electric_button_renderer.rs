@@ -281,13 +281,19 @@ impl CallbackTrait for ElectricButtonCallback {
             None => return,
         };
 
-        // Clip.
-        render_pass.set_scissor_rect(
-            info.clip_rect.min.x as u32,
-            info.clip_rect.min.y as u32,
-            info.clip_rect.width() as u32,
-            info.clip_rect.height() as u32,
-        );
+        // Expand scissor rect to match the shader's expanded quad (includes glow padding).
+        // The quad maps UV 0..1 to button_rect pixels, so scissor must cover the expanded area.
+        let pad_px = (self.uniforms.glow_padding * info.pixels_per_point) as i32;
+        let min_x = (info.clip_rect.min.x as i32).saturating_sub(pad_px).max(0) as u32;
+        let min_y = (info.clip_rect.min.y as i32).saturating_sub(pad_px).max(0) as u32;
+        let max_w = (info.clip_rect.width() as i32 + pad_px * 2).max(1) as u32;
+        let max_h = (info.clip_rect.height() as i32 + pad_px * 2).max(1) as u32;
+        // Clamp to screen bounds
+        let screen_w = info.screen_size_px[0] as u32;
+        let screen_h = info.screen_size_px[1] as u32;
+        let size_w = min_x.saturating_add(max_w).min(screen_w) - min_x;
+        let size_h = min_y.saturating_add(max_h).min(screen_h) - min_y;
+        render_pass.set_scissor_rect(min_x, min_y, size_w, size_h);
 
         // Draw.
         render_pass.set_pipeline(pipeline);

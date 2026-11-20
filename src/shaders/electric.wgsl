@@ -147,25 +147,39 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
     let disp = (noise_val - 0.5) * u.thickness * 2.0 * act;
     let dd = d + disp;
 
-    // Border
-    let border_alpha = smoothstep(0.0, -u.thickness, dd) * act;
+    // === Three-layer border (from Phase 2: 4ff56f3) ===
+    // Phase 2 used egui's solid Stroke renderer — recreate that visibility with sharp edges + narrow AA.
 
-    // Glow
-    let glow_alpha = smoothstep(u.glow_spread, 0.0, d) * act * 0.25;
+    // Layer 1 — Outer glow (wide, soft, like egui's StrokeKind::Outside)
+    let glow_width = u.glow_spread + u.thickness;
+    let glow_alpha = smoothstep(glow_width, glow_width - 2.0, d) * act * 0.7;
 
-    // Core highlight
-    let core_alpha = smoothstep(u.thickness * 0.4, 0.0, d) * act;
+    // Layer 2 — Main stroke (sharp solid band, like egui's main Stroke)
+    let stroke_half = u.thickness;
+    let stroke_aa = 1.5; // narrow antialiasing band
+    let stroke_alpha = smoothstep(stroke_half, stroke_half - stroke_aa, d);
 
-    // Composite
-    let base_color = u.color.rgb;
-    let bright_color = vec3<f32>(0.6, 0.95, 1.0);
+    // Layer 3 — Inner highlight (thin, bright core)
+    let inner_half = u.thickness * 0.5;
+    let inner_aa = 1.0;
+    let inner_alpha = smoothstep(inner_half, inner_half - inner_aa, d);
+    let highlight_color = vec3<f32>(0.85, 1.0, 1.0);
 
-    var final_color = mix(bright_color, base_color, border_alpha);
-    final_color = mix(final_color, energy.rgb, 0.4);
-    final_color += bright_color * core_alpha * 0.6;
+    // Energy packets (RGB + alpha, so they show even on transparent bg)
+    let energy_alpha = length(energy.rgb) * act * 0.5;
 
-    let final_alpha = max(glow_alpha, max(border_alpha, core_alpha));
-    final_color += bright_color * energy.rgb * 0.15;
+    // Composite: additive stacking of all layers
+    var final_color =
+        glow_alpha       * u.color.rgb * 0.5 +       // glow (dimmer, wider)
+        stroke_alpha     * u.color.rgb +               // main stroke (solid)
+        inner_alpha      * highlight_color * 0.5 +      // inner core (bright)
+        energy_alpha     * vec3<f32>(1.0, 0.85, 0.4);  // energy packets
 
-    return vec4<f32>(final_color, final_alpha);
+    // Final alpha: sum of all visible layers
+    var final_alpha = glow_alpha + stroke_alpha + inner_alpha * 0.3 + energy_alpha;
+
+    // Ensure disabled buttons still show a very subtle border
+    final_alpha = max(final_alpha, 0.08 * (1.0 - act));
+
+    return vec4<f32>(final_color, clamp(final_alpha, 0.0, 1.0));
 }
