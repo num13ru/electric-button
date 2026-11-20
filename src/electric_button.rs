@@ -1,7 +1,7 @@
+use crate::electric_button_renderer::draw_static_border;
 use crate::electric_button_state::ElectricButtonState;
 use crate::electric_button_style::ElectricButtonStyle;
-use egui::epaint::RectShape;
-use egui::{Color32, Rect, Shape, Stroke, Ui, Vec2};
+use egui::{Color32, Rect, Ui, Vec2};
 
 /// A clickable button widget that reserves layout space and returns
 /// an egui Response with standard hover/press semantics.
@@ -61,7 +61,7 @@ impl ElectricButton {
         let font_id = egui::TextStyle::Body.resolve(&ui.style());
         let galley = ui
             .painter()
-            .layout_no_wrap(text, font_id, Color32::PLACEHOLDER);
+            .layout_no_wrap(text.clone(), font_id, Color32::PLACEHOLDER);
         let text_w = galley.rect.width();
         let text_h = galley.rect.height();
 
@@ -86,10 +86,24 @@ impl ElectricButton {
         let body_rect =
             Rect::from_center_size(response.rect.center(), Vec2::new(body_width, body_height));
 
-        // Draw a subtle visual hint so the button is visible even
-        // before the GPU effect is implemented. This helps verify
-        // sizing, positioning, and interaction.
-        draw_body_hint(ui, body_rect, &style);
+        // Draw the electric border using the renderer (Phase 2).
+        draw_static_border(ui, body_rect, &style, ElectricButton::determine_state(&response));
+
+        // Draw the text label centered in the body rect.
+        if !text.is_empty() {
+            let label_color = if response.enabled() {
+                Color32::LIGHT_GRAY
+            } else {
+                Color32::DARK_GRAY
+            };
+            ui.painter().text(
+                body_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                text.clone(),
+                egui::FontId::proportional(14.0),
+                label_color,
+            );
+        }
 
         (response, body_rect)
     }
@@ -109,30 +123,6 @@ impl ElectricButton {
         }
         ElectricButtonState::Idle
     }
-}
-
-/// Draw a subtle body hint (faint rounded rect outline + text)
-/// so we can verify sizing and interaction before the GPU shader is ready.
-fn draw_body_hint(ui: &mut Ui, body_rect: Rect, style: &ElectricButtonStyle) {
-    // Draw the rounded rectangle outline as a visual guide.
-    let hint_color =
-        Color32::from_rgba_unmultiplied(style.color.r(), style.color.g(), style.color.b(), 40);
-    let stroke = Stroke::new(1.0, hint_color);
-    ui.painter().add(Shape::Rect(RectShape::stroke(
-        body_rect,
-        style.corner_radius,
-        stroke,
-        egui::StrokeKind::Outside,
-    )));
-
-    // Draw the label centered in the body rect.
-    ui.painter().text(
-        body_rect.center(),
-        egui::Align2::CENTER_CENTER,
-        "⚡ Electric Button",
-        egui::FontId::proportional(14.0),
-        Color32::LIGHT_GRAY,
-    );
 }
 
 fn fmax(a: f32, b: f32) -> f32 {
