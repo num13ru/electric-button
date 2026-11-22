@@ -72,7 +72,7 @@ impl eframe::App for ElectricDemoApp {
                 // Main interactive button.
                 let style = ElectricButtonStyle::default();
 
-                let (response, _body_rect, state, _style) = ElectricButton::new("")
+                let (response, _body_rect, state, _style) = ElectricButton::new("Electric Button")
                     .desired_size(Vec2::new(220.0, 60.0))
                     .style(style)
                     .show(ui, self.shader_time());
