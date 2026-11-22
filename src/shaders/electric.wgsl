@@ -21,6 +21,8 @@ struct Uniforms {
     time: f32,
     /// Active multiplier
     is_active: f32,
+    /// State-dependent brightness multiplier
+    intensity: f32,
 }
 
 @group(0) @binding(0)
@@ -100,6 +102,7 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
     // Time
     let t = u.time;
     let act = u.is_active;
+    let intensity = u.intensity;
 
     // Traveling energy packets along the perimeter
     let tw = u.button_rect.z - u.button_rect.x;
@@ -129,26 +132,26 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
         }
 
         let dist = length(pixel - ep);
-        energy += mix(u.color.rgb, vec3<f32>(1.0, 0.85, 0.4), 0.45) * exp(-dist * 0.8) * act;
+        energy += mix(u.color.rgb, vec3<f32>(1.0, 0.85, 0.4), 0.45) * exp(-dist * 0.8) * act * intensity;
         i += 1u;
     }
 
     // Procedural noise displacement
     let noise_val = fbm(vec3<f32>(pixel * 0.03, t * 1.5));
-    let disp = (noise_val - 0.5) * u.thickness * 2.0 * act;
+    let disp = (noise_val - 0.5) * u.thickness * 2.0 * act * intensity;
     let dd = d + disp;
 
     // Layer 1 — Outer glow (outside the border only)
     let glow_width = u.glow_spread + u.thickness;
-    let glow_alpha = (1.0 - smoothstep(0.0, glow_width, dd)) * act * step(0.0, dd);
+    let glow_alpha = (1.0 - smoothstep(0.0, glow_width, dd)) * act * intensity * step(0.0, dd);
 
     // Layer 2 — Main stroke (thin outline band around the boundary)
     let stroke_aa = 1.5;
-    let stroke_alpha = (1.0 - smoothstep(u.thickness - stroke_aa, u.thickness + stroke_aa, abs(dd))) * act;
+    let stroke_alpha = (1.0 - smoothstep(u.thickness - stroke_aa, u.thickness + stroke_aa, abs(dd))) * act * intensity;
     let stroke_color = mix(u.color.rgb, vec3<f32>(1.0, 1.0, 1.0), 0.35);
 
     // Layer 3 — Inner highlight (thin bright core on the boundary)
-    let highlight_alpha = (1.0 - smoothstep(0.0, 1.0, abs(dd))) * act;
+    let highlight_alpha = (1.0 - smoothstep(0.0, 1.0, abs(dd))) * act * intensity;
     let highlight_color = mix(u.color.rgb, vec3<f32>(0.95, 1.0, 1.0), 0.65);
 
     // Energy packets (already scaled by act inside the loop)

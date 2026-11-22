@@ -7,18 +7,20 @@
 //! via `CallbackResources`). Per-callback uniform buffer and bind group are
 //! created in `prepare` and kept in the callback itself, so each button paints
 //! its own bind group rather than sharing one slot in a common map.
+//! Uniform data is uploaded once via `create_buffer_init` (which writes the
+//! contents); a separate `queue.write_buffer` with identical contents would
+//! be redundant.
 
 use core::num::NonZeroU64;
 
-use bytemuck::{cast_slice, Pod, Zeroable};
+use bytemuck::{Pod, Zeroable, cast_slice};
 use egui::PaintCallbackInfo;
 use egui_wgpu::CallbackTrait;
 use wgpu::{
-    util::DeviceExt as _, BindGroup, BindGroupLayout, BindGroupLayoutDescriptor,
-    BindGroupLayoutEntry, BindingType, Buffer, ColorTargetState, CommandEncoder,
-    Device, FragmentState, PipelineCompilationOptions, PipelineLayoutDescriptor, PolygonMode,
-    PrimitiveState, PrimitiveTopology, Queue, RenderPass, RenderPipeline,
-    TextureFormat,
+    BindGroup, BindGroupLayout, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType,
+    Buffer, ColorTargetState, CommandEncoder, Device, FragmentState, PipelineCompilationOptions,
+    PipelineLayoutDescriptor, PolygonMode, PrimitiveState, PrimitiveTopology, Queue, RenderPass,
+    RenderPipeline, TextureFormat, util::DeviceExt as _,
 };
 
 use crate::shader::create_shader_module;
@@ -66,11 +68,17 @@ pub struct ElectricButtonUniforms {
     pub time: f32,
     /// Active multiplier
     pub is_active: f32,
-    /// Trailing padding so the struct size (80) matches the WGSL struct.
-    pub _pad: f32,
+    /// State-dependent brightness multiplier (Idle 1.0, Hovered 1.3,
+    /// Pressed 1.5, Focused 1.15, Disabled 0.0). Reuses the trailing
+    /// padding slot so the struct size (80) and offsets are unchanged.
+    pub intensity: f32,
 }
 
 impl ElectricButtonUniforms {
+    // Grouping the constructor arguments would duplicate the struct's own
+    // fields and add a second source of truth; the 10-positional-arg form is
+    // used once per frame per callback during show_impl.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         body_rect: egui::Rect,
         viewport_rect: egui::Rect,
@@ -81,6 +89,7 @@ impl ElectricButtonUniforms {
         glow_spread: f32,
         time: f32,
         active: bool,
+        intensity: f32,
     ) -> Self {
         Self {
             button_rect: [
@@ -107,7 +116,7 @@ impl ElectricButtonUniforms {
             time,
             is_active: if active { 1.0 } else { 0.0 },
             _pad0: [0.0, 0.0],
-            _pad: 0.0,
+            intensity,
         }
     }
 }
@@ -132,7 +141,7 @@ impl CallbackTrait for ElectricButtonCallback {
     fn prepare(
         &self,
         device: &Device,
-        queue: &Queue,
+        _queue: &Queue,
         _screen_descriptor: &egui_wgpu::ScreenDescriptor,
         _egui_encoder: &mut CommandEncoder,
         callback_resources: &mut egui_wgpu::CallbackResources,
@@ -148,18 +157,18 @@ impl CallbackTrait for ElectricButtonCallback {
         if resources.bind_group_layout.is_none() {
             let bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
                 label: Some("electric_button_bg_layout"),
-                entries: &[
-                    BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                        ty: BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: NonZeroU64::new(core::mem::size_of::<ElectricButtonUniforms>() as u64),
-                        },
-                        count: None,
+                entries: &[BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: NonZeroU64::new(
+                            core::mem::size_of::<ElectricButtonUniforms>() as u64,
+                        ),
                     },
-                ],
+                    count: None,
+                }],
             });
             resources.bind_group_layout = Some(bgl);
         }
@@ -211,25 +220,19 @@ impl CallbackTrait for ElectricButtonCallback {
         // Create this callback's uniform buffer and bind group.
         let uniform_array = [self.uniforms];
         let uniform_bytes = cast_slice(&uniform_array);
-        let uniform_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("electric_button_uniform"),
-                contents: uniform_bytes,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            },
-        );
-        queue.write_buffer(&uniform_buffer, 0, uniform_bytes);
-
+        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("electric_button_uniform"),
+            contents: uniform_bytes,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         let bgl = resources.bind_group_layout.as_ref().unwrap();
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("electric_button_bind_group"),
             layout: bgl,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: uniform_buffer.as_entire_binding(),
-                },
-            ],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
         });
 
         *self.resource.lock().unwrap() = Some(ButtonResources {
@@ -266,5 +269,47 @@ impl CallbackTrait for ElectricButtonCallback {
         render_pass.set_pipeline(pipeline);
         render_pass.set_bind_group(0, &btn.bind_group, &[]);
         render_pass.draw(0..6, 0..1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn uniform_struct_matches_wgsl_layout() {
+        // The GPU reads exactly the bytes of this struct; WGSL declares the
+        // same fields at the same offsets. If these change, the shader reads
+        // garbage — this test pins the contract.
+        assert_eq!(core::mem::size_of::<ElectricButtonUniforms>(), 80);
+        assert_eq!(core::mem::offset_of!(ElectricButtonUniforms, is_active), 72);
+        assert_eq!(core::mem::offset_of!(ElectricButtonUniforms, intensity), 76);
+    }
+
+    #[test]
+    fn uniforms_carry_expected_layout() {
+        use egui::Rect;
+        let r = Rect::from_min_max(egui::Pos2::new(8.0, 12.0), egui::Pos2::new(128.0, 57.0));
+        let u = ElectricButtonUniforms::new(
+            r,
+            r,
+            2.0,
+            8.0,
+            2.0,
+            egui::Color32::from_rgb(255, 165, 0),
+            6.0,
+            12.5,
+            true,
+            1.3,
+        );
+        assert_eq!(u.button_rect, [16.0, 24.0, 256.0, 114.0]);
+        assert_eq!(u.radius, 16.0);
+        assert_eq!(u.thickness, 4.0);
+        assert_eq!(u.glow_spread, 12.0);
+        assert_eq!(u.time, 12.5);
+        assert_eq!(u.is_active, 1.0);
+        assert_eq!(u.intensity, 1.3);
+        assert!((u.color[0] - 1.0).abs() < 1e-6);
+        assert!((u.color[1] - 165.0 / 255.0).abs() < 1e-3);
     }
 }
