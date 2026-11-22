@@ -55,7 +55,7 @@ impl eframe::App for ElectricDemoApp {
         // Top bar with settings.
         egui::Panel::top("settings_panel").show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new("⚡ Electric Button Demo").size(16.0).strong());
+                ui.label(RichText::new("Electric Button Demo").size(16.0).strong());
                 ui.add_space(16.0);
                 ui.label("Speed:");
                 ui.add(egui::Slider::new(&mut self.speed, 0.1..=3.0).text("Speed"));
