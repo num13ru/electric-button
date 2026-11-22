@@ -3,10 +3,10 @@
 //! Uses egui-wgpu `Callback::new_paint_callback` and `CallbackTrait`
 //! to render the animated border via WGSL shader.
 //!
-//! Pipeline and bind group layout are created once in `prepare`.
-//! Per-button uniform buffer and bind group are created
-//! in `prepare` using device/queue, stored in a shared Vec, and
-//! read back in `paint`.
+//! Pipeline and bind group layout are created once in `prepare` (shared
+//! via `CallbackResources`). Per-callback uniform buffer and bind group are
+//! created in `prepare` and kept in the callback itself, so each button paints
+//! its own bind group rather than sharing one slot in a common map.
 
 use core::num::NonZeroU64;
 
@@ -23,9 +23,10 @@ use wgpu::{
 
 use crate::shader::create_shader_module;
 
-/// Per-button GPU resources stored in shared Vec.
+/// Per-button GPU resources for one frame. Lives inside the callback so each
+/// button owns its own buffer and bind group.
 pub(crate) struct ButtonResources {
-    /// Holds the uniform buffer alive across frames.
+    /// Keeps the uniform buffer alive while the bind group is in use.
     #[allow(dead_code)]
     uniform_buffer: Buffer,
     bind_group: BindGroup,
@@ -37,8 +38,6 @@ pub(crate) struct ElectricButtonPipelineResources {
     pub(crate) pipeline: Option<RenderPipeline>,
     /// Reusable bind group layout.
     pub(crate) bind_group_layout: Option<BindGroupLayout>,
-    /// Per-button resources indexed by callback counter.
-    pub(crate) buttons: Vec<ButtonResources>,
 }
 
 /// Per-instance uniform data. Layout must match the WGSL `Uniforms`
@@ -109,11 +108,15 @@ impl ElectricButtonUniforms {
 /// draws in `paint`.
 pub struct ElectricButtonCallback {
     pub uniforms: ElectricButtonUniforms,
+    resource: std::sync::Mutex<Option<ButtonResources>>,
 }
 
 impl ElectricButtonCallback {
     pub fn new(uniforms: ElectricButtonUniforms) -> Self {
-        Self { uniforms }
+        Self {
+            uniforms,
+            resource: std::sync::Mutex::new(None),
+        }
     }
 }
 
@@ -131,7 +134,6 @@ impl CallbackTrait for ElectricButtonCallback {
             .or_insert_with(|| ElectricButtonPipelineResources {
                 pipeline: None,
                 bind_group_layout: None,
-                buttons: Vec::new(),
             });
 
         // Create bind group layout once.
@@ -198,8 +200,7 @@ impl CallbackTrait for ElectricButtonCallback {
             resources.pipeline = Some(pipeline);
         }
 
-        // Create per-button entry.
-        let idx = resources.buttons.len();
+        // Create this callback's uniform buffer and bind group.
         let mut uniforms_copy = self.uniforms;
         uniforms_copy.screen_size = [
             screen_descriptor.size_in_pixels[0] as f32,
@@ -228,13 +229,10 @@ impl CallbackTrait for ElectricButtonCallback {
             ],
         });
 
-        resources.buttons.push(ButtonResources {
+        *self.resource.lock().unwrap() = Some(ButtonResources {
             uniform_buffer,
             bind_group,
         });
-
-        // Store index for paint to use.
-        callback_resources.insert::<u32>(idx as u32);
 
         Vec::new()
     }
@@ -253,12 +251,8 @@ impl CallbackTrait for ElectricButtonCallback {
             Some(p) => p,
             None => return,
         };
-
-        let idx = match callback_resources.get::<u32>() {
-            Some(&i) => i as usize,
-            None => return,
-        };
-        let btn = match resources.buttons.get(idx) {
+        let resource_guard = self.resource.lock().unwrap();
+        let btn = match resource_guard.as_ref() {
             Some(b) => b,
             None => return,
         };
