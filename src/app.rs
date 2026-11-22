@@ -33,6 +33,9 @@ impl eframe::App for ElectricDemoApp {
         // Update global time.
         self.time += 0.016 * self.speed;
 
+        // Request continuous repaints so the animation runs.
+        ui.ctx().request_repaint();
+
         // Top bar with settings.
         egui::Panel::top("settings_panel").show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -54,7 +57,7 @@ impl eframe::App for ElectricDemoApp {
         // Central content area.
         egui::CentralPanel::default().show(ui, |ui| {
             ui.with_layout(
-                egui::Layout::top_down_justified(egui::Align::Center),
+                egui::Layout::top_down(egui::Align::Center),
                 |ui| {
                     ui.add_space(32.0);
 
@@ -142,6 +145,7 @@ impl eframe::App for ElectricDemoApp {
                         ElectricButton::new("Disabled")
                             .desired_size(Vec2::new(120.0, 45.0))
                             .style(style)
+                            .enabled(false)
                             .show(ui, self.time);
                     });
 

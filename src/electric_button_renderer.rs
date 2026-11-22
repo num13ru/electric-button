@@ -46,14 +46,16 @@ pub(crate) struct ElectricButtonPipelineResources {
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 #[repr(C)]
 pub struct ElectricButtonUniforms {
-    /// Button rect in pixels (min_x, min_y, max_x, max_y)
+    /// Body rect in physical pixels (min_x, min_y, max_x, max_y)
     pub button_rect: [f32; 4],
-    /// Screen size in pixels (width, height)
-    pub screen_size: [f32; 2],
+    /// Expanded callback rect in physical pixels (min_x, min_y, max_x, max_y)
+    pub viewport: [f32; 4],
     /// Corner radius in pixels
     pub radius: f32,
     /// Border thickness in pixels
     pub thickness: f32,
+    /// Padding so `color` lands on a 16-byte boundary (WGSL vec4 alignment).
+    pub _pad0: [f32; 2],
     /// Border color (RGBA)
     pub color: [f32; 4],
     /// Glow spread in pixels
@@ -62,13 +64,14 @@ pub struct ElectricButtonUniforms {
     pub time: f32,
     /// Active multiplier
     pub is_active: f32,
-    /// Trailing padding so the struct size (64) matches the WGSL struct.
+    /// Trailing padding so the struct size (80) matches the WGSL struct.
     pub _pad: f32,
 }
 
 impl ElectricButtonUniforms {
     pub fn new(
-        callback_rect: egui::Rect,
+        body_rect: egui::Rect,
+        viewport_rect: egui::Rect,
         pixels_per_point: f32,
         radius: f32,
         thickness: f32,
@@ -77,28 +80,31 @@ impl ElectricButtonUniforms {
         time: f32,
         active: bool,
     ) -> Self {
-        // button_rect is the body rect in physical pixels (unexpanded).
-        // UV 0..1 spans the full screen; clipping happens via the scissor rect
-        // in paint().
         Self {
             button_rect: [
-                callback_rect.min.x * pixels_per_point,
-                callback_rect.min.y * pixels_per_point,
-                callback_rect.max.x * pixels_per_point,
-                callback_rect.max.y * pixels_per_point,
+                body_rect.min.x * pixels_per_point,
+                body_rect.min.y * pixels_per_point,
+                body_rect.max.x * pixels_per_point,
+                body_rect.max.y * pixels_per_point,
             ],
-            screen_size: [0.0, 0.0], // filled in prepare()
-            radius,
-            thickness,
+            viewport: [
+                viewport_rect.min.x * pixels_per_point,
+                viewport_rect.min.y * pixels_per_point,
+                viewport_rect.max.x * pixels_per_point,
+                viewport_rect.max.y * pixels_per_point,
+            ],
+            radius: radius * pixels_per_point,
+            thickness: thickness * pixels_per_point,
             color: [
                 color.r() as f32 / 255.0,
                 color.g() as f32 / 255.0,
                 color.b() as f32 / 255.0,
                 color.a() as f32 / 255.0,
             ],
-            glow_spread,
+            glow_spread: glow_spread * pixels_per_point,
             time,
             is_active: if active { 1.0 } else { 0.0 },
+            _pad0: [0.0, 0.0],
             _pad: 0.0,
         }
     }
@@ -201,12 +207,8 @@ impl CallbackTrait for ElectricButtonCallback {
         }
 
         // Create this callback's uniform buffer and bind group.
-        let mut uniforms_copy = self.uniforms;
-        uniforms_copy.screen_size = [
-            screen_descriptor.size_in_pixels[0] as f32,
-            screen_descriptor.size_in_pixels[1] as f32,
-        ];
-        let uniform_array = [uniforms_copy];
+        let _ = screen_descriptor;
+        let uniform_array = [self.uniforms];
         let uniform_bytes = cast_slice(&uniform_array);
         let uniform_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -256,31 +258,10 @@ impl CallbackTrait for ElectricButtonCallback {
             Some(b) => b,
             None => return,
         };
+        let _ = info;
 
-        // Reset the per-callback viewport (egui_wgpu sets it to the callback
-        // rect) so the quad spans the full screen; the shader maps UV 0..1
-        // onto the full screen.
-        let screen_w = info.screen_size_px[0] as f32;
-        let screen_h = info.screen_size_px[1] as f32;
-        let pp = info.pixels_per_point;
-        render_pass.set_viewport(0.0, 0.0, screen_w, screen_h, 0.0, 1.0);
-
-        // Scissor = clipped (expanded) callback rect in physical pixels,
-        // clamped to the screen.
-        let margin = 2.0 * pp;
-        let left = (info.clip_rect.min.x * pp - margin).max(0.0);
-        let top = (info.clip_rect.min.y * pp - margin).max(0.0);
-        let right = (info.clip_rect.max.x * pp + margin).min(screen_w);
-        let bottom = (info.clip_rect.max.y * pp + margin).min(screen_h);
-        if right > left && bottom > top {
-            render_pass.set_scissor_rect(
-                left as u32,
-                top as u32,
-                (right - left) as u32,
-                (bottom - top) as u32,
-            );
-        }
-
+        // Draw with the viewport that egui_wgpu set to the (expanded)
+        // callback rect — no manual viewport or scissor manipulation.
         // Draw.
         render_pass.set_pipeline(pipeline);
         render_pass.set_bind_group(0, &btn.bind_group, &[]);

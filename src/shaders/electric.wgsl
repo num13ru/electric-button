@@ -5,10 +5,10 @@
 // travel along the perimeter creating bright spots.
 
 struct Uniforms {
-    /// Button rect in pixels (min_x, min_y, max_x, max_y)
+    /// Button body rect in physical pixels (min_x, min_y, max_x, max_y)
     button_rect: vec4<f32>,
-    /// Screen size in pixels (width, height)
-    screen_size: vec2<f32>,
+    /// Expanded callback rect in physical pixels (min_x, min_y, max_x, max_y)
+    viewport: vec4<f32>,
     /// Corner radius in pixels
     radius: f32,
     /// Border thickness in pixels
@@ -91,9 +91,8 @@ fn sdf_rounded_rect(p: vec2<f32>, rect: vec4<f32>, radius: f32) -> f32 {
 
 @fragment
 fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
-    // Convert UV to screen pixel coords (quad spans the full screen; the
-    // renderer resets the viewport to the full screen before drawing).
-    let pixel = input.uv * u.screen_size;
+    // Convert UV to physical-pixel coords within the expanded callback rect.
+    let pixel = u.viewport.xy + input.uv * (u.viewport.zw - u.viewport.xy);
 
     // SDF
     let d = sdf_rounded_rect(pixel, u.button_rect, u.radius);
@@ -130,7 +129,7 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
         }
 
         let dist = length(pixel - ep);
-        energy += vec3<f32>(1.0, 0.85, 0.4) * exp(-dist * 0.8) * act;
+        energy += mix(u.color.rgb, vec3<f32>(1.0, 0.85, 0.4), 0.45) * exp(-dist * 0.8) * act;
         i += 1u;
     }
 
@@ -146,11 +145,11 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
     // Layer 2 — Main stroke (thin outline band around the boundary)
     let stroke_aa = 1.5;
     let stroke_alpha = (1.0 - smoothstep(u.thickness - stroke_aa, u.thickness + stroke_aa, abs(dd))) * act;
-    let stroke_color = vec3<f32>(1.0, 1.0, 1.0);
+    let stroke_color = mix(u.color.rgb, vec3<f32>(1.0, 1.0, 1.0), 0.35);
 
     // Layer 3 — Inner highlight (thin bright core on the boundary)
     let highlight_alpha = (1.0 - smoothstep(0.0, 1.0, abs(dd))) * act;
-    let highlight_color = vec3<f32>(0.9, 1.0, 1.0);
+    let highlight_color = mix(u.color.rgb, vec3<f32>(0.95, 1.0, 1.0), 0.65);
 
     // Energy packets (already scaled by act inside the loop)
     let energy_alpha = length(energy.rgb) * 0.3;
@@ -160,13 +159,15 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
         glow_alpha * u.color.rgb * 0.35 +
         stroke_alpha * stroke_color +
         highlight_alpha * highlight_color * 0.8 +
-        energy_alpha * vec3<f32>(1.0, 0.85, 0.4);
+        energy_alpha * mix(u.color.rgb, vec3<f32>(1.0, 0.85, 0.4), 0.45);
 
     // Final alpha
     var final_alpha = glow_alpha + stroke_alpha + highlight_alpha * 0.5 + energy_alpha;
 
-    // Disabled minimum
-    final_alpha = max(final_alpha, 0.1 * (1.0 - act));
+    // Disabled minimum: dim ghost outline in neutral gray
+    let ghost_stroke = (1.0 - smoothstep(u.thickness - stroke_aa, u.thickness + stroke_aa, abs(dd))) * (1.0 - act) * 0.35;
+    final_color += ghost_stroke * vec3<f32>(0.55, 0.55, 0.6);
+    final_alpha = max(final_alpha, ghost_stroke);
 
     return vec4<f32>(final_color, clamp(final_alpha, 0.0, 1.0));
 }

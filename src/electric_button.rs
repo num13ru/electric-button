@@ -10,6 +10,7 @@ pub struct ElectricButton {
     desired_size: Vec2,
     style: ElectricButtonStyle,
     time: f32,
+    enabled: Option<bool>,
 }
 
 impl ElectricButton {
@@ -35,13 +36,23 @@ impl ElectricButton {
         self
     }
 
+    pub fn enabled(mut self, enabled: bool) -> Self {
+        self.enabled = Some(enabled);
+        self
+    }
+
     pub fn show(
         self,
         ui: &mut Ui,
         global_time: f32,
     ) -> (egui::Response, Rect, ElectricButtonState, ElectricButtonStyle) {
+        let enabled = self.enabled.unwrap_or(true);
         let button = self.clone();
-        let response = button.show_impl(ui, global_time);
+        let response = if enabled {
+            button.show_impl(ui, global_time)
+        } else {
+            ui.add_enabled_ui(false, |ui| button.show_impl(ui, global_time)).inner
+        };
         let body_rect = response.rect;
         let state = ElectricButton::determine_state(&response);
         let style = self.style;
@@ -86,10 +97,17 @@ impl ElectricButton {
             egui::FontId::proportional(14.0),
             label_color,
         );
+        // Expand the callback rect to cover the glow ring around the body.
+        // Only the clip region is expanded — the hit target stays response.rect
+        // (Shape::Callback does not affect hit testing).
+        let expanded = response
+            .rect
+            .expand(style.glow_padding() / ui.ctx().pixels_per_point());
 
         // Build GPU uniforms and callback.
         let uniforms = ElectricButtonUniforms::new(
             response.rect,
+            expanded,
             ui.ctx().pixels_per_point(),
             style.corner_radius,
             style.border_thickness,
@@ -101,14 +119,7 @@ impl ElectricButton {
                 ElectricButtonState::Disabled
             ),
         );
-
-        // Expand the callback rect to cover the glow ring around the body.
-        // Only the clip region is expanded — the hit target stays response.rect
-        // (Shape::Callback does not affect hit testing). The shader quad is a
-        // full-screen quad; UV 0..1 maps to screen_size pixels, with the
-        // expanded rect used only for the scissor rect in the renderer.
         let callback = ElectricButtonCallback::new(uniforms);
-        let expanded = response.rect.expand(style.glow_padding() / ui.ctx().pixels_per_point());
         let paint_callback = egui_wgpu::Callback::new_paint_callback(expanded, callback);
         ui.painter().add(egui::epaint::Shape::Callback(paint_callback));
 
