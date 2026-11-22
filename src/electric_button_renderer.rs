@@ -4,7 +4,7 @@
 //! to render the animated border via WGSL shader.
 //!
 //! Pipeline and bind group layout are created once in `prepare`.
-//! Per-button uniform buffer, sampler, and bind group are created
+//! Per-button uniform buffer and bind group are created
 //! in `prepare` using device/queue, stored in a shared Vec, and
 //! read back in `paint`.
 
@@ -15,9 +15,9 @@ use egui::PaintCallbackInfo;
 use egui_wgpu::CallbackTrait;
 use wgpu::{
     util::DeviceExt as _, BindGroup, BindGroupLayout, BindGroupLayoutDescriptor,
-    BindGroupLayoutEntry, BindingResource, BindingType, Buffer, ColorTargetState, CommandEncoder,
+    BindGroupLayoutEntry, BindingType, Buffer, ColorTargetState, CommandEncoder,
     Device, FragmentState, PipelineCompilationOptions, PipelineLayoutDescriptor, PolygonMode,
-    PrimitiveState, PrimitiveTopology, Queue, RenderPass, RenderPipeline, SamplerDescriptor,
+    PrimitiveState, PrimitiveTopology, Queue, RenderPass, RenderPipeline,
     TextureFormat,
 };
 
@@ -41,7 +41,9 @@ pub(crate) struct ElectricButtonPipelineResources {
     pub(crate) buttons: Vec<ButtonResources>,
 }
 
-/// Per-instance uniform data. Must be 16-byte aligned.
+/// Per-instance uniform data. Layout must match the WGSL `Uniforms`
+/// struct (struct alignment 16, size 64), so it ends with a trailing
+/// padding field instead of implicit padding (bytemuck requires no padding).
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 #[repr(C)]
 pub struct ElectricButtonUniforms {
@@ -57,18 +59,17 @@ pub struct ElectricButtonUniforms {
     pub color: [f32; 4],
     /// Glow spread in pixels
     pub glow_spread: f32,
-    /// Animation padding in points
-    pub glow_padding: f32,
     /// Animation time
     pub time: f32,
     /// Active multiplier
     pub is_active: f32,
+    /// Trailing padding so the struct size (64) matches the WGSL struct.
+    pub _pad: f32,
 }
 
 impl ElectricButtonUniforms {
     pub fn new(
         callback_rect: egui::Rect,
-        glow_padding: f32,
         pixels_per_point: f32,
         radius: f32,
         thickness: f32,
@@ -77,12 +78,9 @@ impl ElectricButtonUniforms {
         time: f32,
         active: bool,
     ) -> Self {
-        // TODO(stale comment — nothing is expanded here): show_impl passes the
-        // UNEXPANDED `response.rect` as `callback_rect`, so button_rect is the
-        // body rect in physical pixels. The shader maps UV 0..1 to `screen_size`
-        // (not to button_rect); the expanded region is only the paint callback/clip
-        // rect, and clipping to it comes from the scissor rect in paint().
-        // button_rect itself = body rect in physical pixels.
+        // button_rect is the body rect in physical pixels (unexpanded).
+        // UV 0..1 spans the full screen; clipping happens via the scissor rect
+        // in paint().
         Self {
             button_rect: [
                 callback_rect.min.x * pixels_per_point,
@@ -100,9 +98,9 @@ impl ElectricButtonUniforms {
                 color.a() as f32 / 255.0,
             ],
             glow_spread,
-            glow_padding,
             time,
             is_active: if active { 1.0 } else { 0.0 },
+            _pad: 0.0,
         }
     }
 }
@@ -149,12 +147,6 @@ impl CallbackTrait for ElectricButtonCallback {
                             has_dynamic_offset: false,
                             min_binding_size: NonZeroU64::new(core::mem::size_of::<ElectricButtonUniforms>() as u64),
                         },
-                        count: None,
-                    },
-                    BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
                 ],
@@ -225,20 +217,6 @@ impl CallbackTrait for ElectricButtonCallback {
         queue.write_buffer(&uniform_buffer, 0, uniform_bytes);
 
         let bgl = resources.bind_group_layout.as_ref().unwrap();
-        // TODO(dead resource — sampler never sampled): the shader never samples
-        // binding 1, so this sampler and its bind group entry are per-button waste.
-        // Suggested fix: remove the sampler creation, the bind group layout entry,
-        // and the `var s: sampler` binding in electric.wgsl (see TODO there).
-        let sampler = device.create_sampler(&SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
-            ..Default::default()
-        });
-
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("electric_button_bind_group"),
             layout: bgl,
@@ -246,10 +224,6 @@ impl CallbackTrait for ElectricButtonCallback {
                 wgpu::BindGroupEntry {
                     binding: 0,
                     resource: uniform_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: BindingResource::Sampler(&sampler),
                 },
             ],
         });
@@ -289,20 +263,29 @@ impl CallbackTrait for ElectricButtonCallback {
             None => return,
         };
 
-        // TODO(bug — scissor rect can exceed the render target): min is clamped to
-        // 0, but width/height are not clamped, so a button near the bottom/right
-        // edge pushes the scissor past the render target and wgpu-core rejects it
-        // (InvalidScissorRect). Also asymmetric: min is clamped at 0 but the grown
-        // width/height are not clamped against the render target.
-        // Suggested fix: clamp min to 0 and width/height to the render target
-        // bounds (or skip the scissor entirely), using only `info.clip_rect`.
-        let margin = 2i32;
-        render_pass.set_scissor_rect(
-            (info.clip_rect.min.x as i32).saturating_sub(margin).max(0) as u32,
-            (info.clip_rect.min.y as i32).saturating_sub(margin).max(0) as u32,
-            (info.clip_rect.width() as i32 + margin * 2).max(1) as u32,
-            (info.clip_rect.height() as i32 + margin * 2).max(1) as u32,
-        );
+        // Reset the per-callback viewport (egui_wgpu sets it to the callback
+        // rect) so the quad spans the full screen; the shader maps UV 0..1
+        // onto the full screen.
+        let screen_w = info.screen_size_px[0] as f32;
+        let screen_h = info.screen_size_px[1] as f32;
+        let pp = info.pixels_per_point;
+        render_pass.set_viewport(0.0, 0.0, screen_w, screen_h, 0.0, 1.0);
+
+        // Scissor = clipped (expanded) callback rect in physical pixels,
+        // clamped to the screen.
+        let margin = 2.0 * pp;
+        let left = (info.clip_rect.min.x * pp - margin).max(0.0);
+        let top = (info.clip_rect.min.y * pp - margin).max(0.0);
+        let right = (info.clip_rect.max.x * pp + margin).min(screen_w);
+        let bottom = (info.clip_rect.max.y * pp + margin).min(screen_h);
+        if right > left && bottom > top {
+            render_pass.set_scissor_rect(
+                left as u32,
+                top as u32,
+                (right - left) as u32,
+                (bottom - top) as u32,
+            );
+        }
 
         // Draw.
         render_pass.set_pipeline(pipeline);
