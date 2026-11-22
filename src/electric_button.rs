@@ -9,7 +9,6 @@ pub struct ElectricButton {
     text: String,
     desired_size: Vec2,
     style: ElectricButtonStyle,
-    time: f32,
     enabled: Option<bool>,
 }
 
@@ -28,11 +27,6 @@ impl ElectricButton {
 
     pub fn style(mut self, style: ElectricButtonStyle) -> Self {
         self.style = style;
-        self
-    }
-
-    pub fn time(mut self, time: f32) -> Self {
-        self.time = time;
         self
     }
 
@@ -113,7 +107,7 @@ impl ElectricButton {
             style.border_thickness,
             style.color,
             style.glow_spread,
-            if self.time > 0.0 { self.time } else { global_time },
+            global_time,
             !matches!(
                 ElectricButton::determine_state(&response),
                 ElectricButtonState::Disabled

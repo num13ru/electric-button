@@ -8,9 +8,7 @@ use egui::{Color32, RichText, Vec2};
 pub struct ElectricDemoApp {
     main_click_count: u32,
     main_state: ElectricButtonState,
-    reduced_motion: bool,
     speed: f32,
-    intensity: f32,
     /// Global animation time (updated each frame).
     time: f32,
 }
@@ -20,9 +18,7 @@ impl ElectricDemoApp {
         Self {
             main_click_count: 0,
             main_state: ElectricButtonState::Idle,
-            reduced_motion: false,
             speed: 1.0,
-            intensity: 1.0,
             time: 0.0,
         }
     }
@@ -41,13 +37,9 @@ impl eframe::App for ElectricDemoApp {
             ui.horizontal(|ui| {
                 ui.label(RichText::new("⚡ Electric Button Demo").size(16.0).strong());
                 ui.add_space(16.0);
-                ui.checkbox(&mut self.reduced_motion, "Reduced motion");
-                ui.add_space(8.0);
                 ui.label("Speed:");
                 ui.add(egui::Slider::new(&mut self.speed, 0.1..=3.0).text("Speed"));
                 ui.add_space(8.0);
-                ui.label("Intensity:");
-                ui.add(egui::Slider::new(&mut self.intensity, 0.1..=2.0).text("Intensity"));
                 ui.separator();
                 ui.label(format!("Clicks: {}", self.main_click_count));
                 ui.label(format!("State: {:?}", self.main_state));
@@ -62,12 +54,7 @@ impl eframe::App for ElectricDemoApp {
                     ui.add_space(32.0);
 
                     // Main interactive button.
-                    let style = ElectricButtonStyle {
-                        reduced_motion: self.reduced_motion,
-                        speed: self.speed,
-                        intensity: self.intensity,
-                        ..Default::default()
-                    };
+                    let style = ElectricButtonStyle::default();
 
                     let (response, _body_rect, state, _style) = ElectricButton::new("")
                         .desired_size(Vec2::new(220.0, 60.0))

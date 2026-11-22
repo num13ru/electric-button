@@ -27,6 +27,8 @@ use crate::shader::create_shader_module;
 /// button owns its own buffer and bind group.
 pub(crate) struct ButtonResources {
     /// Keeps the uniform buffer alive while the bind group is in use.
+    // TODO(dead-code): intentionally unread — holding the buffer reference
+    // keeps the GPU resource alive for the lifetime of the bind group.
     #[allow(dead_code)]
     uniform_buffer: Buffer,
     bind_group: BindGroup,
@@ -41,8 +43,8 @@ pub(crate) struct ElectricButtonPipelineResources {
 }
 
 /// Per-instance uniform data. Layout must match the WGSL `Uniforms`
-/// struct (struct alignment 16, size 64), so it ends with a trailing
-/// padding field instead of implicit padding (bytemuck requires no padding).
+/// struct (struct alignment 16, size 80), so it carries explicit padding
+/// fields instead of implicit padding (bytemuck requires no padding).
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 #[repr(C)]
 pub struct ElectricButtonUniforms {
@@ -131,7 +133,7 @@ impl CallbackTrait for ElectricButtonCallback {
         &self,
         device: &Device,
         queue: &Queue,
-        screen_descriptor: &egui_wgpu::ScreenDescriptor,
+        _screen_descriptor: &egui_wgpu::ScreenDescriptor,
         _egui_encoder: &mut CommandEncoder,
         callback_resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
@@ -207,7 +209,6 @@ impl CallbackTrait for ElectricButtonCallback {
         }
 
         // Create this callback's uniform buffer and bind group.
-        let _ = screen_descriptor;
         let uniform_array = [self.uniforms];
         let uniform_bytes = cast_slice(&uniform_array);
         let uniform_buffer = device.create_buffer_init(
@@ -241,7 +242,7 @@ impl CallbackTrait for ElectricButtonCallback {
 
     fn paint(
         &self,
-        info: PaintCallbackInfo,
+        _info: PaintCallbackInfo,
         render_pass: &mut RenderPass<'static>,
         callback_resources: &egui_wgpu::CallbackResources,
     ) {
@@ -258,7 +259,6 @@ impl CallbackTrait for ElectricButtonCallback {
             Some(b) => b,
             None => return,
         };
-        let _ = info;
 
         // Draw with the viewport that egui_wgpu set to the (expanded)
         // callback rect — no manual viewport or scissor manipulation.
