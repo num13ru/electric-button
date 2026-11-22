@@ -103,10 +103,13 @@ impl ElectricButton {
             ),
         );
 
-        // Expand the callback rect to match the shader's expanded button_rect.
+        // Expand the callback rect to cover the glow ring around the body.
         let callback = ElectricButtonCallback::new(uniforms);
-        // The shader quad maps UV 0..1 to button_rect pixels (expanded by glow_padding).
-        // The clickable area stays at response.rect — Shape::Callback doesn't affect hit testing.
+        // TODO(stale comment — nothing is expanded here): the shader quad is a
+        // full-screen NDC quad; UV 0..1 maps to `screen_size` pixels, NOT to
+        // button_rect pixels. button_rect is the unexpanded body rect in physical
+        // pixels; the expanded callback rect is only the clip region (drives the
+        // scissor rect in the renderer), and the hit target stays response.rect.
         let expanded = response.rect.expand(style.glow_padding() / ui.ctx().pixels_per_point());
         let paint_callback = egui_wgpu::Callback::new_paint_callback(expanded, callback);
         ui.painter().add(egui::epaint::Shape::Callback(paint_callback));

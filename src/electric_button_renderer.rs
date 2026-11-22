@@ -77,14 +77,18 @@ impl ElectricButtonUniforms {
         time: f32,
         active: bool,
     ) -> Self {
-        // Expand rect by glow padding (in points), then convert to pixels
-        let expanded = callback_rect.expand(glow_padding / pixels_per_point);
+        // TODO(stale comment — nothing is expanded here): show_impl passes the
+        // UNEXPANDED `response.rect` as `callback_rect`, so button_rect is the
+        // body rect in physical pixels. The shader maps UV 0..1 to `screen_size`
+        // (not to button_rect); the expanded region is only the paint callback/clip
+        // rect, and clipping to it comes from the scissor rect in paint().
+        // button_rect itself = body rect in physical pixels.
         Self {
             button_rect: [
-                expanded.min.x * pixels_per_point,
-                expanded.min.y * pixels_per_point,
-                expanded.max.x * pixels_per_point,
-                expanded.max.y * pixels_per_point,
+                callback_rect.min.x * pixels_per_point,
+                callback_rect.min.y * pixels_per_point,
+                callback_rect.max.x * pixels_per_point,
+                callback_rect.max.y * pixels_per_point,
             ],
             screen_size: [0.0, 0.0], // filled in prepare()
             radius,
@@ -221,6 +225,10 @@ impl CallbackTrait for ElectricButtonCallback {
         queue.write_buffer(&uniform_buffer, 0, uniform_bytes);
 
         let bgl = resources.bind_group_layout.as_ref().unwrap();
+        // TODO(dead resource — sampler never sampled): the shader never samples
+        // binding 1, so this sampler and its bind group entry are per-button waste.
+        // Suggested fix: remove the sampler creation, the bind group layout entry,
+        // and the `var s: sampler` binding in electric.wgsl (see TODO there).
         let sampler = device.create_sampler(&SamplerDescriptor {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
@@ -281,19 +289,20 @@ impl CallbackTrait for ElectricButtonCallback {
             None => return,
         };
 
-        // Expand scissor rect to match the shader's expanded quad (includes glow padding).
-        // The quad maps UV 0..1 to button_rect pixels, so scissor must cover the expanded area.
-        let pad_px = (self.uniforms.glow_padding * info.pixels_per_point) as i32;
-        let min_x = (info.clip_rect.min.x as i32).saturating_sub(pad_px).max(0) as u32;
-        let min_y = (info.clip_rect.min.y as i32).saturating_sub(pad_px).max(0) as u32;
-        let max_w = (info.clip_rect.width() as i32 + pad_px * 2).max(1) as u32;
-        let max_h = (info.clip_rect.height() as i32 + pad_px * 2).max(1) as u32;
-        // Clamp to screen bounds
-        let screen_w = info.screen_size_px[0] as u32;
-        let screen_h = info.screen_size_px[1] as u32;
-        let size_w = min_x.saturating_add(max_w).min(screen_w) - min_x;
-        let size_h = min_y.saturating_add(max_h).min(screen_h) - min_y;
-        render_pass.set_scissor_rect(min_x, min_y, size_w, size_h);
+        // TODO(bug — scissor rect can exceed the render target): min is clamped to
+        // 0, but width/height are not clamped, so a button near the bottom/right
+        // edge pushes the scissor past the render target and wgpu-core rejects it
+        // (InvalidScissorRect). Also asymmetric: min is clamped at 0 but the grown
+        // width/height are not clamped against the render target.
+        // Suggested fix: clamp min to 0 and width/height to the render target
+        // bounds (or skip the scissor entirely), using only `info.clip_rect`.
+        let margin = 2i32;
+        render_pass.set_scissor_rect(
+            (info.clip_rect.min.x as i32).saturating_sub(margin).max(0) as u32,
+            (info.clip_rect.min.y as i32).saturating_sub(margin).max(0) as u32,
+            (info.clip_rect.width() as i32 + margin * 2).max(1) as u32,
+            (info.clip_rect.height() as i32 + margin * 2).max(1) as u32,
+        );
 
         // Draw.
         render_pass.set_pipeline(pipeline);
