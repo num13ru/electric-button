@@ -86,9 +86,10 @@ impl ElectricButton {
 
         // Draw text label.
         let label_color = if response.enabled() {
-            Color32::LIGHT_GRAY
+            ui.style().visuals.text_color()
         } else {
-            Color32::DARK_GRAY
+            let tc = ui.style().visuals.text_color();
+            Color32::from_rgba_unmultiplied(tc.r(), tc.g(), tc.b(), 150)
         };
         ui.painter().text(
             response.rect.center(),

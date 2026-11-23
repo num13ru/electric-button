@@ -157,20 +157,28 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
     // Energy packets (already scaled by act inside the loop)
     let energy_alpha = length(energy.rgb) * 0.3;
 
-    // Composite
-    var final_color =
-        glow_alpha * u.color.rgb * 0.35 +
-        stroke_alpha * stroke_color +
-        highlight_alpha * highlight_color * 0.8 +
-        energy_alpha * mix(u.color.rgb, vec3<f32>(1.0, 0.85, 0.4), 0.45);
+    // Composite with sequential "over" blending (color must NOT be scaled
+    // by alpha — blending applies src alpha again, double-dimming the glow).
+    let glow_color = mix(u.color.rgb, vec3<f32>(1.0, 1.0, 1.0), 0.35);
+    let energy_color = mix(u.color.rgb, vec3<f32>(1.0, 0.85, 0.4), 0.45);
 
-    // Final alpha
-    var final_alpha = glow_alpha + stroke_alpha + highlight_alpha * 0.5 + energy_alpha;
+    var rgb = glow_color;
+    var a = glow_alpha;
+
+    rgb = stroke_color * stroke_alpha + rgb * (1.0 - stroke_alpha);
+    a = stroke_alpha + a * (1.0 - stroke_alpha);
+
+    let hi_alpha = highlight_alpha * 0.8;
+    rgb = highlight_color * hi_alpha + rgb * (1.0 - hi_alpha);
+    a = hi_alpha + a * (1.0 - hi_alpha);
+
+    rgb = energy_color * energy_alpha + rgb * (1.0 - energy_alpha);
+    a = energy_alpha + a * (1.0 - energy_alpha);
 
     // Disabled minimum: dim ghost outline in neutral gray
     let ghost_stroke = (1.0 - smoothstep(u.thickness - stroke_aa, u.thickness + stroke_aa, abs(dd))) * (1.0 - act) * 0.35;
-    final_color += ghost_stroke * vec3<f32>(0.55, 0.55, 0.6);
-    final_alpha = max(final_alpha, ghost_stroke);
+    rgb = vec3<f32>(0.75, 0.75, 0.8) * ghost_stroke + rgb * (1.0 - ghost_stroke);
+    a = ghost_stroke + a * (1.0 - ghost_stroke);
 
-    return vec4<f32>(final_color, clamp(final_alpha, 0.0, 1.0));
+    return vec4<f32>(rgb, clamp(a, 0.0, 1.0));
 }
