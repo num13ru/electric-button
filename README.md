@@ -3,6 +3,8 @@
 A clickable button widget with a GPU-rendered lightning border, built with
 egui/eframe and wgpu.
 
+![Electric Button demo](assets/screenshot.webp)
+
 ## Features
 
 - GPU-rendered electric-border animation (WGSL shader via `wgpu::include_wgsl!`)
