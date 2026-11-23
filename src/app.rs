@@ -11,6 +11,14 @@ const MAX_FRAME_DT: f32 = 0.1;
 /// Demo app showing multiple ElectricButton instances with
 /// GPU-rendered lightning animation.
 pub struct ElectricDemoApp {
+    /// Buttons are created once and reused across frames so each button's
+    /// GPU uniform buffer and bind group persist (and are only re-uploaded
+    /// each frame, not reallocated).
+    main_button: ElectricButton,
+    amber_button: ElectricButton,
+    violet_button: ElectricButton,
+    sharp_button: ElectricButton,
+    disabled_button: ElectricButton,
     main_click_count: u32,
     main_state: ElectricButtonState,
     speed: f32,
@@ -23,6 +31,35 @@ pub struct ElectricDemoApp {
 impl ElectricDemoApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         Self {
+            main_button: ElectricButton::new("Electric Button")
+                .desired_size(Vec2::new(220.0, 60.0))
+                .style(ElectricButtonStyle::default()),
+            amber_button: ElectricButton::new("Amber")
+                .desired_size(Vec2::new(120.0, 45.0))
+                .style(ElectricButtonStyle {
+                    color: Color32::from_rgb(255, 165, 0),
+                    ..Default::default()
+                }),
+            violet_button: ElectricButton::new("Violet")
+                .desired_size(Vec2::new(120.0, 45.0))
+                .style(ElectricButtonStyle {
+                    color: Color32::from_rgb(255, 100, 100),
+                    corner_radius: 24.0,
+                    ..Default::default()
+                }),
+            sharp_button: ElectricButton::new("Sharp")
+                .desired_size(Vec2::new(120.0, 45.0))
+                .style(ElectricButtonStyle {
+                    corner_radius: 4.0,
+                    ..Default::default()
+                }),
+            disabled_button: ElectricButton::new("Disabled")
+                .desired_size(Vec2::new(120.0, 45.0))
+                .style(ElectricButtonStyle {
+                    corner_radius: 8.0,
+                    ..Default::default()
+                })
+                .enabled(false),
             main_click_count: 0,
             main_state: ElectricButtonState::Idle,
             speed: 1.0,
@@ -76,12 +113,8 @@ impl eframe::App for ElectricDemoApp {
                 ui.add_space(32.0);
 
                 // Main interactive button.
-                let style = ElectricButtonStyle::default();
-
-                let (response, _body_rect, state, _style) = ElectricButton::new("Electric Button")
-                    .desired_size(Vec2::new(220.0, 60.0))
-                    .style(style)
-                    .show(ui, self.shader_time());
+                let (response, _body_rect, state, _style) =
+                    self.main_button.show(ui, self.shader_time());
 
                 if state != self.main_state {
                     self.main_state = state;
@@ -113,33 +146,9 @@ impl eframe::App for ElectricDemoApp {
                 ui.add_space(8.0);
 
                 ui.horizontal(|ui| {
-                    let style = ElectricButtonStyle {
-                        color: Color32::from_rgb(255, 165, 0),
-                        ..Default::default()
-                    };
-                    ElectricButton::new("Amber")
-                        .desired_size(Vec2::new(120.0, 45.0))
-                        .style(style)
-                        .show(ui, self.shader_time());
-
-                    let style = ElectricButtonStyle {
-                        color: Color32::from_rgb(255, 100, 100),
-                        corner_radius: 24.0,
-                        ..Default::default()
-                    };
-                    ElectricButton::new("Violet")
-                        .desired_size(Vec2::new(120.0, 45.0))
-                        .style(style)
-                        .show(ui, self.shader_time());
-
-                    let style = ElectricButtonStyle {
-                        corner_radius: 4.0,
-                        ..Default::default()
-                    };
-                    ElectricButton::new("Sharp")
-                        .desired_size(Vec2::new(120.0, 45.0))
-                        .style(style)
-                        .show(ui, self.shader_time());
+                    let _ = self.amber_button.show(ui, self.shader_time());
+                    let _ = self.violet_button.show(ui, self.shader_time());
+                    let _ = self.sharp_button.show(ui, self.shader_time());
                 });
 
                 ui.add_space(32.0);
@@ -149,15 +158,7 @@ impl eframe::App for ElectricDemoApp {
                 // Disabled button.
                 ui.horizontal(|ui| {
                     ui.label("Disabled:");
-                    let style = ElectricButtonStyle {
-                        corner_radius: 8.0,
-                        ..Default::default()
-                    };
-                    ElectricButton::new("Disabled")
-                        .desired_size(Vec2::new(120.0, 45.0))
-                        .style(style)
-                        .enabled(false)
-                        .show(ui, self.shader_time());
+                    let _ = self.disabled_button.show(ui, self.shader_time());
                 });
 
                 ui.add_space(16.0);
@@ -172,6 +173,11 @@ mod tests {
 
     fn app() -> ElectricDemoApp {
         ElectricDemoApp {
+            main_button: ElectricButton::new("Electric Button"),
+            amber_button: ElectricButton::new("Amber"),
+            violet_button: ElectricButton::new("Violet"),
+            sharp_button: ElectricButton::new("Sharp"),
+            disabled_button: ElectricButton::new("Disabled"),
             main_click_count: 0,
             main_state: ElectricButtonState::Idle,
             speed: 1.0,

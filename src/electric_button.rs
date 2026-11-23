@@ -1,15 +1,35 @@
-use crate::electric_button_renderer::{ElectricButtonCallback, ElectricButtonUniforms};
+use crate::electric_button_renderer::{
+    ButtonResources, ElectricButtonCallback, ElectricButtonUniforms,
+};
 use crate::electric_button_state::ElectricButtonState;
 use crate::electric_button_style::ElectricButtonStyle;
 use egui::{Color32, Rect, Ui, Vec2};
+use std::sync::{Arc, Mutex};
 
 /// A clickable button widget with GPU-rendered electric border.
-#[derive(Clone, Debug, Default)]
+///
+/// The widget owns a GPU-resource handle shared across frames, so the
+/// uniform buffer and bind group are allocated once instead of per frame.
+/// Buttons should be created once and reused across frames (the demo app
+/// stores them on the app struct).
 pub struct ElectricButton {
     text: String,
     desired_size: Vec2,
     style: ElectricButtonStyle,
     enabled: Option<bool>,
+    resource: Arc<Mutex<Option<ButtonResources>>>,
+}
+
+impl Default for ElectricButton {
+    fn default() -> Self {
+        Self {
+            text: String::new(),
+            desired_size: Vec2::ZERO,
+            style: ElectricButtonStyle::default(),
+            enabled: None,
+            resource: Arc::new(Mutex::new(None)),
+        }
+    }
 }
 
 impl ElectricButton {
@@ -36,7 +56,7 @@ impl ElectricButton {
     }
 
     pub fn show(
-        self,
+        &self,
         ui: &mut Ui,
         global_time: f32,
     ) -> (
@@ -54,8 +74,7 @@ impl ElectricButton {
         };
         let body_rect = response.rect;
         let state = ElectricButton::determine_state(&response);
-        let style = self.style;
-        (response, body_rect, state, style)
+        (response, body_rect, state, self.style.clone())
     }
 
     fn show_impl(&self, ui: &mut Ui, global_time: f32) -> egui::Response {
@@ -112,7 +131,7 @@ impl ElectricButton {
             !matches!(state, ElectricButtonState::Disabled),
             state.intensity(),
         );
-        let callback = ElectricButtonCallback::new(uniforms);
+        let callback = ElectricButtonCallback::new(uniforms, self.resource.clone());
         let paint_callback = egui_wgpu::Callback::new_paint_callback(expanded, callback);
         ui.painter()
             .add(egui::epaint::Shape::Callback(paint_callback));

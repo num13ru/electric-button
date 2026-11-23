@@ -25,13 +25,12 @@ use wgpu::{
 
 use crate::shader::create_shader_module;
 
-/// Per-button GPU resources for one frame. Lives inside the callback so each
-/// button owns its own buffer and bind group.
+/// Per-button GPU resources, shared across frames via an Arc: the buffer
+/// and bind group are created once on first `prepare` and reused; each frame
+/// only the uniform bytes are re-uploaded via `queue.write_buffer`.
 pub(crate) struct ButtonResources {
-    /// Keeps the uniform buffer alive while the bind group is in use.
-    // TODO(dead-code): intentionally unread — holding the buffer reference
-    // keeps the GPU resource alive for the lifetime of the bind group.
-    #[allow(dead_code)]
+    /// Keeps the uniform buffer alive while the bind group is in use;
+    /// also used to re-upload uniform bytes each frame.
     uniform_buffer: Buffer,
     bind_group: BindGroup,
 }
@@ -123,17 +122,17 @@ impl ElectricButtonUniforms {
 
 /// Button render callback. Creates GPU resources in `prepare`,
 /// draws in `paint`.
-pub struct ElectricButtonCallback {
-    pub uniforms: ElectricButtonUniforms,
-    resource: std::sync::Mutex<Option<ButtonResources>>,
+pub(crate) struct ElectricButtonCallback {
+    uniforms: ElectricButtonUniforms,
+    resource: std::sync::Arc<std::sync::Mutex<Option<ButtonResources>>>,
 }
 
 impl ElectricButtonCallback {
-    pub fn new(uniforms: ElectricButtonUniforms) -> Self {
-        Self {
-            uniforms,
-            resource: std::sync::Mutex::new(None),
-        }
+    pub(crate) fn new(
+        uniforms: ElectricButtonUniforms,
+        resource: std::sync::Arc<std::sync::Mutex<Option<ButtonResources>>>,
+    ) -> Self {
+        Self { uniforms, resource }
     }
 }
 
@@ -141,7 +140,7 @@ impl CallbackTrait for ElectricButtonCallback {
     fn prepare(
         &self,
         device: &Device,
-        _queue: &Queue,
+        queue: &Queue,
         _screen_descriptor: &egui_wgpu::ScreenDescriptor,
         _egui_encoder: &mut CommandEncoder,
         callback_resources: &mut egui_wgpu::CallbackResources,
@@ -217,28 +216,38 @@ impl CallbackTrait for ElectricButtonCallback {
             resources.pipeline = Some(pipeline);
         }
 
-        // Create this callback's uniform buffer and bind group.
-        let uniform_array = [self.uniforms];
-        let uniform_bytes = cast_slice(&uniform_array);
-        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("electric_button_uniform"),
-            contents: uniform_bytes,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        // Reuse the per-callback GPU resources across frames; only create
+        // them on first prepare. Later frames just re-upload the bytes.
         let bgl = resources.bind_group_layout.as_ref().unwrap();
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("electric_button_bind_group"),
-            layout: bgl,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
-            }],
-        });
-
-        *self.resource.lock().unwrap() = Some(ButtonResources {
-            uniform_buffer,
-            bind_group,
-        });
+        let mut guard = self.resource.lock().unwrap();
+        match guard.as_mut() {
+            Some(res) => {
+                let uniform_array = [self.uniforms];
+                let bytes = cast_slice(&uniform_array);
+                queue.write_buffer(&res.uniform_buffer, 0, bytes);
+            }
+            None => {
+                let uniform_array = [self.uniforms];
+                let uniform_bytes = cast_slice(&uniform_array);
+                let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("electric_button_uniform"),
+                    contents: uniform_bytes,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("electric_button_bind_group"),
+                    layout: bgl,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: uniform_buffer.as_entire_binding(),
+                    }],
+                });
+                *guard = Some(ButtonResources {
+                    uniform_buffer,
+                    bind_group,
+                });
+            }
+        }
 
         Vec::new()
     }
