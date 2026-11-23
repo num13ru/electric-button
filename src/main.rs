@@ -5,9 +5,11 @@ fn main() {
         viewport: egui::ViewportBuilder::default().with_inner_size([480.0, 480.0]),
         ..Default::default()
     };
-    let _ = eframe::run_native(
+    if let Err(e) = eframe::run_native(
         "Electric Button",
         native_options,
         Box::new(|cc| Ok(Box::new(ElectricDemoApp::new(cc)))),
-    );
+    ) {
+        eprintln!("electric-button exited with error: {e}");
+    }
 }

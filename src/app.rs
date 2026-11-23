@@ -16,8 +16,8 @@ pub struct ElectricDemoApp {
     speed: f32,
     /// Global animation time in seconds (updated each frame).
     time: f64,
-    /// Cached status label text; rebuilt only when inputs change.
-    status_text: String,
+    /// Cached status label; rebuilt only when click count or state changes.
+    status_text: egui::RichText,
 }
 
 impl ElectricDemoApp {
@@ -27,7 +27,7 @@ impl ElectricDemoApp {
             main_state: ElectricButtonState::Idle,
             speed: 1.0,
             time: 0.0,
-            status_text: String::new(),
+            status_text: egui::RichText::new("").size(14.0),
         }
     }
 
@@ -91,15 +91,16 @@ impl eframe::App for ElectricDemoApp {
                     self.main_click_count += 1;
                 }
 
-                let new_status = format!(
+                let new_status = egui::RichText::new(format!(
                     "Clicks: {} | State: {:?}",
                     self.main_click_count, self.main_state
-                );
+                ))
+                .size(14.0);
                 if self.status_text != new_status {
                     self.status_text = new_status;
                 }
                 ui.add_space(16.0);
-                ui.label(RichText::new(self.status_text.clone()).size(14.0));
+                ui.label(self.status_text.clone());
 
                 ui.add_space(32.0);
                 ui.separator();
@@ -175,7 +176,7 @@ mod tests {
             main_state: ElectricButtonState::Idle,
             speed: 1.0,
             time: 0.0,
-            status_text: String::new(),
+            status_text: egui::RichText::new("").size(14.0),
         }
     }
 

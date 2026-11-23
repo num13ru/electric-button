@@ -59,7 +59,7 @@ impl ElectricButton {
     }
 
     fn show_impl(&self, ui: &mut Ui, global_time: f32) -> egui::Response {
-        let style = self.style.clone();
+        let style = &self.style;
 
         // Measure text.
         let font_id = egui::TextStyle::Body.resolve(ui.style());
