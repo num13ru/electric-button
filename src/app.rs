@@ -16,6 +16,8 @@ pub struct ElectricDemoApp {
     speed: f32,
     /// Global animation time in seconds (updated each frame).
     time: f64,
+    /// Cached status label text; rebuilt only when inputs change.
+    status_text: String,
 }
 
 impl ElectricDemoApp {
@@ -25,6 +27,7 @@ impl ElectricDemoApp {
             main_state: ElectricButtonState::Idle,
             speed: 1.0,
             time: 0.0,
+            status_text: String::new(),
         }
     }
 
@@ -49,8 +52,11 @@ impl eframe::App for ElectricDemoApp {
         let dt = ui.ctx().input(|i| i.stable_dt).min(MAX_FRAME_DT);
         self.advance_time(dt);
 
-        // Request continuous repaints so the animation runs.
-        ui.ctx().request_repaint();
+        // Request continuous repaints so the animation runs — but only while
+        // the animation is actually advancing (speed > 0).
+        if self.speed > 0.0 {
+            ui.ctx().request_repaint();
+        }
 
         // Top bar with settings.
         egui::Panel::top("settings_panel").show(ui, |ui| {
@@ -85,14 +91,15 @@ impl eframe::App for ElectricDemoApp {
                     self.main_click_count += 1;
                 }
 
-                ui.add_space(16.0);
-                ui.label(
-                    RichText::new(format!(
-                        "Clicks: {} | State: {:?}",
-                        self.main_click_count, self.main_state
-                    ))
-                    .size(14.0),
+                let new_status = format!(
+                    "Clicks: {} | State: {:?}",
+                    self.main_click_count, self.main_state
                 );
+                if self.status_text != new_status {
+                    self.status_text = new_status;
+                }
+                ui.add_space(16.0);
+                ui.label(RichText::new(self.status_text.clone()).size(14.0));
 
                 ui.add_space(32.0);
                 ui.separator();
@@ -168,6 +175,7 @@ mod tests {
             main_state: ElectricButtonState::Idle,
             speed: 1.0,
             time: 0.0,
+            status_text: String::new(),
         }
     }
 

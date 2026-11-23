@@ -46,11 +46,10 @@ impl ElectricButton {
         ElectricButtonStyle,
     ) {
         let enabled = self.enabled.unwrap_or(true);
-        let button = self.clone();
         let response = if enabled {
-            button.show_impl(ui, global_time)
+            self.show_impl(ui, global_time)
         } else {
-            ui.add_enabled_ui(false, |ui| button.show_impl(ui, global_time))
+            ui.add_enabled_ui(false, |ui| self.show_impl(ui, global_time))
                 .inner
         };
         let body_rect = response.rect;
@@ -59,15 +58,14 @@ impl ElectricButton {
         (response, body_rect, state, style)
     }
 
-    fn show_impl(mut self, ui: &mut Ui, global_time: f32) -> egui::Response {
-        let text = std::mem::take(&mut self.text);
-        let style = self.style;
+    fn show_impl(&self, ui: &mut Ui, global_time: f32) -> egui::Response {
+        let style = self.style.clone();
 
         // Measure text.
         let font_id = egui::TextStyle::Body.resolve(ui.style());
         let galley = ui
             .painter()
-            .layout_no_wrap(text.clone(), font_id, Color32::PLACEHOLDER);
+            .layout_no_wrap(self.text.clone(), font_id, Color32::PLACEHOLDER);
         let text_w = galley.rect.width();
         let text_h = galley.rect.height();
 
@@ -91,13 +89,8 @@ impl ElectricButton {
             let tc = ui.style().visuals.text_color();
             Color32::from_rgba_unmultiplied(tc.r(), tc.g(), tc.b(), 150)
         };
-        ui.painter().text(
-            response.rect.center(),
-            egui::Align2::CENTER_CENTER,
-            text,
-            egui::FontId::proportional(14.0),
-            label_color,
-        );
+        let label_top_left = response.rect.center() - Vec2::new(text_w / 2.0, text_h / 2.0);
+        ui.painter().galley(label_top_left, galley, label_color);
         // Expand the callback rect to cover the glow ring around the body.
         // Only the clip region is expanded — the hit target stays response.rect
         // (Shape::Callback does not affect hit testing).
